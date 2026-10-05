@@ -57,6 +57,8 @@
       fputs((sep), (stream));                                                             \
   }
 
+#define range_end(rg) (rg)->items + (rg)->count
+
 #define ASSERT_UNREACHABLE assert("Unreachable" && 0)
 
 static const char *SHORT_FLAG_FILTER = "f";
@@ -404,41 +406,36 @@ void print_csv_header(const CSV *csv) {
   const typeof (csv->columns_offsets) *columns_offsets = &csv->columns_offsets;
   const typeof (csv->columns_storage) *columns = &csv->columns_storage;
 
-  const char *ptr = columns->items;
-  for (size_t i = 0; i < columns_offsets->count; ++i) {
+  const size_t *end = range_end(columns_offsets);
+  for (const size_t *it = columns_offsets->items; it != end; ++it) {
+    const char *ptr = columns->items + *it;
     fputs(ptr, stdout);
-    if (i + 1 != columns_offsets->count)
+    if (it + 1 != end)
       fputc('\t', stdout);
-
-    while (*ptr != '\0')
-      ++ptr;
-    ++ptr;
   }
 
   fputc('\n', stdout);
 }
 
 void print_csv_body(const CSV *csv) {
-  const typeof (csv->columns_offsets) *columns_offsets = &csv->columns_offsets;
   const typeof (csv->data_storage) *data = &csv->data_storage;
   const typeof (csv->points_offsets) *points = &csv->points_offsets;
 
-  const char *ptr = data->items;
-  size_t record_count = points->count / columns_offsets->count;
-  for (size_t record = 0; record < record_count; ++record) {
-    for (size_t i = 0; i < columns_offsets->count; ++i) {
-      fputs(ptr, stdout);
-      if (i + 1 != columns_offsets->count) {
-        fputc('\t', stdout);
-      }
+  size_t counter = 0, n_columns = csv->columns_offsets.count;
+  const size_t *end = range_end(points);
+  for (const size_t *it = points->items; it != end; ++it) {
+    size_t column = (counter++ % n_columns) + 1;
+    const char *ptr = data->items + *it;
 
-      while (*ptr != '\0')
-        ++ptr;
-      ++ptr;
+    fputs(ptr, stdout);
+    if (it + 1 != end && column == n_columns) {
+      fputc('\n', stdout);
     }
-
-    fputc('\n', stdout);
+    else if (it + 1 != end) {
+      fputc('\t', stdout);
+    }
   }
+  fputc('\n', stdout);
 }
 
 void populate_filter_indices(struct IndexDA *indices, const Program *program) {
@@ -475,9 +472,9 @@ void print_filtered_csv_body(const CSV *csv, const size_t *indices, size_t count
   const typeof (csv->data_storage) *data = &csv->data_storage;
   const typeof (csv->points_offsets) *points = &csv->points_offsets;
 
-  size_t record_count = points->count / columns->count;
+  size_t n_records = points->count / columns->count;
   const size_t *end = indices + count;
-  for (size_t record = 0; record < record_count; ++record) {
+  for (size_t record = 0; record < n_records; ++record) {
     const char *last_str = NULL;
     for (const size_t *it = indices; it != end; ++it) {
       const char *str = data->items + points->items[record * columns->count + *it];
