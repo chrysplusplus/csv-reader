@@ -59,8 +59,7 @@ static const char *SHORT_NO_HEADER   = "H";
 static const char *SHORT_FLAG_HELP   = "h";
 static const char *LONG_FLAG_HELP    = "help";
 
-// TODO program file-name agnostic
-static const char *USAGE = "csv [OPTIONS] file\n\n"
+static const char *USAGE = "%s [OPTIONS] file\n\n"
   "Options:\n"
   "    -f, --filter columns : Filter output to specified columns\n"
   "    -l, --list           : List columns in file\n"
@@ -97,6 +96,7 @@ typedef struct Program {
   CSV                *csv;
   OutputFlags         output_flags;
   ProgramMode         mode;
+  const char         *program_name;
 } Program;
 
 struct IndexDA {
@@ -149,6 +149,9 @@ void program_filters_splits(Program *program) {
 }
 
 int program_flags_parse(Program *program, int argc, char **argv) {
+  program->program_name = *(argv++);
+  --argc;
+
   while (argc > 0) {
     char *cur_arg = *argv;
     if (cur_arg[0] == '-') {
@@ -174,7 +177,7 @@ int program_flags_parse(Program *program, int argc, char **argv) {
           program->output_flags |= FLAG_NO_HEADER;
           break;
         case OPT_HELP:
-          fputs(USAGE, stdout);
+          fprintf(stdout, USAGE, program->program_name);
           exit(EXIT_FAILURE);
           break;
         default:
@@ -505,9 +508,6 @@ void run_program_mode(const Program *program) {
 
 int main(int argc, char **argv) {
   Program program = {0};
-  const char *prog_name = *(argv++);
-  --argc;
-
   if (program_flags_parse(&program, argc, argv)) {
     fputs("Error parsing program\n", stderr);
     return EXIT_FAILURE;
