@@ -67,18 +67,25 @@ static const char *SHORT_FLAG_LIST   = "l";
 static const char *LONG_FLAG_LIST    = "list";
 static const char *LONG_NO_HEADER    = "no-header";
 static const char *SHORT_NO_HEADER   = "H";
+static const char *LONG_FORMAT       = "format";
+static const char *SHORT_FORMAT      = "F";
+static const char *LONG_FIELD_SEP    = "field-separator";
+static const char *LONG_RECORD_SEP   = "record-separator";
 static const char *SHORT_FLAG_HELP   = "h";
 static const char *LONG_FLAG_HELP    = "help";
 
 static const char *USAGE = "%s [OPTIONS] file\n\n"
   "Options:\n"
-  "    -f, --filter columns : Filter output to specified columns\n"
-  "    -l, --list           : List columns in file\n"
-  "    -H, --no-header      : Don't print header in output\n"
-  "    -h, --help           : Print this message\n";
+  "    -f, --filter columns       : Filter output to specified columns\n"
+  "    -l, --list                 : List columns in file\n"
+  "    -H, --no-header            : Don't print header in output\n"
+  "    -F, --format               : Format string for printing fields\n"
+  "        --field-separator sep  : Use sep to separate fields\n"
+  "        --record-separator sep : Use sep to separate records\n"
+  "    -h, --help                 : Print this message\n";
 
 typedef enum {
-  OPT_UNKNOWN, OPT_FILTER, OPT_LIST, OPT_NO_HEADER, OPT_HELP
+  OPT_UNKNOWN, OPT_FILTER, OPT_LIST, OPT_NO_HEADER, OPT_FORMAT, OPT_FIELD_SEP, OPT_RECORD_SEP, OPT_HELP
 } ProgramOpt;
 
 typedef enum {
@@ -86,8 +93,10 @@ typedef enum {
 } ProgramMode;
 
 typedef enum {
-  FLAG_NORMAL    = 0,
-  FLAG_NO_HEADER = 1 << 0
+  FLAG_NORMAL         = 0,
+  FLAG_NO_HEADER      = 1 << 0,
+  FLAG_FIELD_SEP_SET  = 1 << 1,
+  FLAG_RECORD_SEP_SET = 1 << 2
 } OutputFlags;
 
 #define PROG_FLAGS_FILTERS_INIT_CAPACITY 256
@@ -99,14 +108,21 @@ typedef struct CSV {
   DA_DECLARE(size_t)  points_offsets;
 } CSV;
 
+typedef struct Printer {
+  const char  *field_sep;
+  const char  *record_sep;
+  const char  *field_format_string;
+  OutputFlags  flags;
+} Printer;
+
 typedef struct Program {
   DA_DECLARE(char)    filters;
   DA_DECLARE(size_t)  valid_filter_column_offsets;
+  Printer             printer;
   FILE               *file;
   const char         *filepath;
   CSV                *csv;
   const char         *program_name;
-  OutputFlags         output_flags;
   ProgramMode         mode;
 } Program;
 
@@ -114,6 +130,20 @@ struct IndexDA {
   size_t *items;
   size_t count, capacity;
 };
+
+void printer_default_separators(Printer *printer) {
+  if (!(printer->flags & FLAG_FIELD_SEP_SET))
+    printer->field_sep = "\t";
+  if (!(printer->flags & FLAG_RECORD_SEP_SET))
+    printer->record_sep = "\n";
+}
+
+void fprint_field(FILE *stream, Printer printer, const char* field) {
+  if (printer.field_format_string != NULL)
+    fprintf(stream, printer.field_format_string, field);
+  else
+    fputs(field, stream);
+}
 
 ProgramOpt extract_prog_opt(char *arg) {
   assert(*arg == '-');
@@ -126,6 +156,12 @@ ProgramOpt extract_prog_opt(char *arg) {
       return OPT_LIST;
     if (strcmp(arg, LONG_NO_HEADER) == 0)
       return OPT_NO_HEADER;
+    if (strcmp(arg, LONG_FORMAT) == 0)
+      return OPT_FORMAT;
+    if (strcmp(arg, LONG_FIELD_SEP) == 0)
+      return OPT_FIELD_SEP;
+    if (strcmp(arg, LONG_RECORD_SEP) == 0)
+      return OPT_RECORD_SEP;
     if (strcmp(arg, LONG_FLAG_HELP) == 0)
       return OPT_HELP;
     return OPT_UNKNOWN;
@@ -137,14 +173,16 @@ ProgramOpt extract_prog_opt(char *arg) {
     return OPT_LIST;
   if (strcmp(arg, SHORT_NO_HEADER) == 0)
     return OPT_NO_HEADER;
+  if (strcmp(arg, SHORT_FORMAT) == 0)
+    return OPT_FORMAT;
   if (strcmp(arg, SHORT_FLAG_HELP) == 0)
     return OPT_HELP;
   return OPT_UNKNOWN;
 }
 
-char *program_expect_filter(Program *, int argc, char **argv) {
-  if (argc == 0 || *argv[0] == '-') {
-    fputs("Error: Expected argument for --filter\n", stderr);
+char *program_expect_cmd_arg(int argc, char **argv, const char *err_msg) {
+  if (argc == 0 || **argv == '-') {
+    fputs(err_msg, stderr);
     return NULL;
   }
   else {
@@ -168,13 +206,11 @@ int program_flags_parse(Program *program, int argc, char **argv) {
     if (cur_arg[0] == '-') {
       switch (extract_prog_opt(cur_arg)) {
         case OPT_UNKNOWN:
-          fputs("Error: Unknown flag\n", stderr);
+          fprintf(stderr, "Error: Unknown flag '%s'\n", cur_arg);
           return 1;
         case OPT_FILTER:
           {
-            --argc;
-            ++argv;
-            char *filter = program_expect_filter(program, argc, argv);
+            char *filter = program_expect_cmd_arg(--argc, ++argv, "Error: Expected argument for --filter\n");
             if (filter == NULL)
               return 1;
 
@@ -185,8 +221,37 @@ int program_flags_parse(Program *program, int argc, char **argv) {
           program->mode = MODE_LIST;
           break;
         case OPT_NO_HEADER:
-          program->output_flags |= FLAG_NO_HEADER;
+          program->printer.flags |= FLAG_NO_HEADER;
           break;
+        case OPT_FORMAT:
+          {
+            char *format_str = program_expect_cmd_arg(--argc, ++argv, "Error: Expected argument for --format\n");
+            if (format_str == NULL)
+              return 1;
+
+            program->printer.field_format_string = format_str;
+            break;
+          }
+        case OPT_FIELD_SEP:
+          {
+            char *sep = program_expect_cmd_arg(--argc, ++argv, "Error: Expected argument for --field-separator\n");
+            if (sep == NULL)
+              return 1;
+
+            program->printer.flags |= FLAG_FIELD_SEP_SET;
+            program->printer.field_sep = sep;
+            break;
+          }
+        case OPT_RECORD_SEP:
+          {
+            char *sep = program_expect_cmd_arg(--argc, ++argv, "Error: Expected argument for --record-separator\n");
+            if (sep == NULL)
+              return 1;
+
+            program->printer.flags |= FLAG_RECORD_SEP_SET;
+            program->printer.record_sep = sep;
+            break;
+          }
         case OPT_HELP:
           fprintf(stdout, USAGE, program->program_name);
           exit(EXIT_FAILURE);
@@ -209,6 +274,7 @@ int program_flags_parse(Program *program, int argc, char **argv) {
   }
 
   program_filters_split(program);
+  printer_default_separators(&program->printer);
   return 0;
 }
 
@@ -402,24 +468,28 @@ void prog_flags_validate_filters(Program *program) {
   }
 }
 
-void print_csv_header(const CSV *csv) {
+void print_csv_header(Printer printer, const CSV *csv) {
   const typeof (csv->columns_offsets) *columns_offsets = &csv->columns_offsets;
   const typeof (csv->columns_storage) *columns = &csv->columns_storage;
+
+  const char *field_sep = printer.field_sep, *record_sep = printer.record_sep;
 
   const size_t *end = range_end(columns_offsets);
   for (const size_t *it = columns_offsets->items; it != end; ++it) {
     const char *ptr = columns->items + *it;
-    fputs(ptr, stdout);
+    fprint_field(stdout, printer, ptr);
     if (it + 1 != end)
-      fputc('\t', stdout);
+      fputs(field_sep, stdout);
   }
 
-  fputc('\n', stdout);
+  fputs(record_sep, stdout);
 }
 
-void print_csv_body(const CSV *csv) {
+void print_csv_body(Printer printer, const CSV *csv) {
   const typeof (csv->data_storage) *data = &csv->data_storage;
   const typeof (csv->points_offsets) *points = &csv->points_offsets;
+
+  const char *field_sep = printer.field_sep, *record_sep = printer.record_sep;
 
   size_t counter = 0, n_columns = csv->columns_offsets.count;
   const size_t *end = range_end(points);
@@ -427,15 +497,15 @@ void print_csv_body(const CSV *csv) {
     size_t column = (counter++ % n_columns) + 1;
     const char *ptr = data->items + *it;
 
-    fputs(ptr, stdout);
+    fprint_field(stdout, printer, ptr);
     if (it + 1 != end && column == n_columns) {
-      fputc('\n', stdout);
+      fputs(record_sep, stdout);
     }
     else if (it + 1 != end) {
-      fputc('\t', stdout);
+      fputs(field_sep, stdout);
     }
   }
-  fputc('\n', stdout);
+  fputs(record_sep, stdout);
 }
 
 void populate_filter_indices(struct IndexDA *indices, const Program *program) {
@@ -449,28 +519,32 @@ void populate_filter_indices(struct IndexDA *indices, const Program *program) {
         da_append(indices, i);
 }
 
-void print_filtered_csv_header(const CSV *csv, const size_t *indices, size_t count) {
+void print_filtered_csv_header(Printer printer, const CSV *csv, const size_t *indices, size_t count) {
   const typeof (csv->columns_offsets) *offsets = &csv->columns_offsets;
   const typeof (csv->columns_storage) *columns = &csv->columns_storage;
+
+  const char *field_sep = printer.field_sep, *record_sep = printer.record_sep;
 
   const size_t *end = indices + count;
   const char *last_str = NULL;
   for (const size_t *it = indices; it != end; ++it) {
     const char *str = columns->items + offsets->items[*it];
     if (last_str != NULL)
-      fputc('\t', stdout);
+      fputs(field_sep, stdout);
 
-    fputs(str, stdout);
+    fprint_field(stdout, printer, str);
     last_str = str;
   }
 
-  fputc('\n', stdout);
+  fputs(record_sep, stdout);
 }
 
-void print_filtered_csv_body(const CSV *csv, const size_t *indices, size_t count) {
+void print_filtered_csv_body(Printer printer, const CSV *csv, const size_t *indices, size_t count) {
   const typeof (csv->columns_offsets) *columns = &csv->columns_offsets;
   const typeof (csv->data_storage) *data = &csv->data_storage;
   const typeof (csv->points_offsets) *points = &csv->points_offsets;
+
+  const char *field_sep = printer.field_sep, *record_sep = printer.record_sep;
 
   size_t n_records = points->count / columns->count;
   const size_t *end = indices + count;
@@ -479,12 +553,12 @@ void print_filtered_csv_body(const CSV *csv, const size_t *indices, size_t count
     for (const size_t *it = indices; it != end; ++it) {
       const char *str = data->items + points->items[record * columns->count + *it];
       if (last_str != NULL)
-        fputc('\t', stdout);
+        fputs(field_sep, stdout);
 
-      fputs(str, stdout);
+      fprint_field(stdout, printer, str);
       last_str = str;
     }
-    fputc('\n', stdout);
+    fputs(record_sep, stdout);
   }
 }
 
@@ -492,25 +566,31 @@ void print_csv_data(const Program *program) {
   struct IndexDA indices = {0};
   populate_filter_indices(&indices, program);
 
-  if (indices.count != 0 && !(program->output_flags & FLAG_NO_HEADER)) {
-    print_filtered_csv_header(program->csv, indices.items, indices.count);
-    print_filtered_csv_body(program->csv, indices.items, indices.count);
+  if (indices.count != 0 && !(program->printer.flags & FLAG_NO_HEADER)) {
+    print_filtered_csv_header(program->printer, program->csv, indices.items, indices.count);
+    print_filtered_csv_body(program->printer, program->csv, indices.items, indices.count);
   }
   else if (indices.count != 0) {
-    print_filtered_csv_body(program->csv, indices.items, indices.count);
+    print_filtered_csv_body(program->printer, program->csv, indices.items, indices.count);
   }
-  else if (!(program->output_flags & FLAG_NO_HEADER)) {
-    print_csv_header(program->csv);
-    print_csv_body(program->csv);
+  else if (!(program->printer.flags & FLAG_NO_HEADER)) {
+    print_csv_header(program->printer, program->csv);
+    print_csv_body(program->printer, program->csv);
   }
   else {
-    print_csv_body(program->csv);
+    print_csv_body(program->printer, program->csv);
   }
 }
 
 void print_csv_columns(const CSV *csv) {
-  const char *buf_columns = csv->columns_storage.items;
-  print_strings_at_offsets_in_contiguous_buffer(&csv->columns_offsets, buf_columns, "%s", "\n", stdout);
+  const typeof (csv->columns_offsets) *offsets = &csv->columns_offsets;
+  const size_t *end = range_end(offsets);
+  for (const size_t *it = offsets->items; it != end; ++it) {
+    const char *str = csv->columns_storage.items + *it;
+    fputs(str, stdout);
+    if (it + 1 != end)
+      fputc('\n', stdout);
+  }
   fputc('\n', stdout);
 }
 
