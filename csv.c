@@ -61,18 +61,19 @@
 
 #define ASSERT_UNREACHABLE assert("Unreachable" && 0)
 
-static const char *SHORT_FLAG_FILTER = "f";
-static const char *LONG_FLAG_FILTER  = "filter";
-static const char *SHORT_FLAG_LIST   = "l";
-static const char *LONG_FLAG_LIST    = "list";
-static const char *LONG_NO_HEADER    = "no-header";
-static const char *SHORT_NO_HEADER   = "H";
-static const char *LONG_FORMAT       = "format";
-static const char *SHORT_FORMAT      = "F";
-static const char *LONG_FIELD_SEP    = "field-sep";
-static const char *LONG_RECORD_SEP   = "record-sep";
-static const char *SHORT_FLAG_HELP   = "h";
-static const char *LONG_FLAG_HELP    = "help";
+static const char *LONG_FLAG_FILTER       = "filter";
+static const char *LONG_FLAG_LIST         = "list";
+static const char *LONG_FLAG_NO_HEADER    = "no-header";
+static const char *LONG_FLAG_FORMAT       = "format";
+static const char *LONG_FLAG_FIELD_SEP    = "field-sep";
+static const char *LONG_FLAG_RECORD_SEP   = "record-sep";
+static const char *LONG_FLAG_HELP         = "help";
+
+static const char  SHORT_FLAG_FILTER      = 'f';
+static const char  SHORT_FLAG_LIST        = 'l';
+static const char  SHORT_FLAG_NO_HEADER   = 'H';
+static const char  SHORT_FLAG_FORMAT      = 'F';
+static const char  SHORT_FLAG_HELP        = 'h';
 
 static const char *USAGE = "%s [OPTIONS] file\n\n"
   "Options:\n"
@@ -150,35 +151,34 @@ void fprint_field(FILE *stream, Printer printer, const char* field) {
 
 ProgramOpt extract_prog_opt(char *arg) {
   assert(*arg == '-');
-  ++arg;
-  if (*arg == '-') {
+  if (*(++arg) == '-') {
     ++arg;
     if (strcmp(arg, LONG_FLAG_FILTER) == 0)
       return OPT_FILTER;
     if (strcmp(arg, LONG_FLAG_LIST) == 0)
       return OPT_LIST;
-    if (strcmp(arg, LONG_NO_HEADER) == 0)
+    if (strcmp(arg, LONG_FLAG_NO_HEADER) == 0)
       return OPT_NO_HEADER;
-    if (strcmp(arg, LONG_FORMAT) == 0)
+    if (strcmp(arg, LONG_FLAG_FORMAT) == 0)
       return OPT_FORMAT;
-    if (strcmp(arg, LONG_FIELD_SEP) == 0)
+    if (strcmp(arg, LONG_FLAG_FIELD_SEP) == 0)
       return OPT_FIELD_SEP;
-    if (strcmp(arg, LONG_RECORD_SEP) == 0)
+    if (strcmp(arg, LONG_FLAG_RECORD_SEP) == 0)
       return OPT_RECORD_SEP;
     if (strcmp(arg, LONG_FLAG_HELP) == 0)
       return OPT_HELP;
     return OPT_UNKNOWN;
   }
 
-  if (strcmp(arg, SHORT_FLAG_FILTER) == 0)
+  if (*arg == SHORT_FLAG_FILTER)
     return OPT_FILTER;
-  if (strcmp(arg, SHORT_FLAG_LIST) == 0)
+  if (*arg == SHORT_FLAG_LIST)
     return OPT_LIST;
-  if (strcmp(arg, SHORT_NO_HEADER) == 0)
+  if (*arg == SHORT_FLAG_NO_HEADER)
     return OPT_NO_HEADER;
-  if (strcmp(arg, SHORT_FORMAT) == 0)
+  if (*arg == SHORT_FLAG_FORMAT)
     return OPT_FORMAT;
-  if (strcmp(arg, SHORT_FLAG_HELP) == 0)
+  if (*arg == SHORT_FLAG_HELP)
     return OPT_HELP;
   return OPT_UNKNOWN;
 }
