@@ -5,7 +5,7 @@
 
 #define DA_INIT_CAPACITY 256
 
-#define DA_DECLARE(T) struct { T *items; size_t count, capacity; }
+#define da_declare(T) struct { T *items; size_t count, capacity; }
 
 #define da_destroy(da)  \
   do {                  \
@@ -69,8 +69,8 @@ static const char *LONG_NO_HEADER    = "no-header";
 static const char *SHORT_NO_HEADER   = "H";
 static const char *LONG_FORMAT       = "format";
 static const char *SHORT_FORMAT      = "F";
-static const char *LONG_FIELD_SEP    = "field-separator";
-static const char *LONG_RECORD_SEP   = "record-separator";
+static const char *LONG_FIELD_SEP    = "field-sep";
+static const char *LONG_RECORD_SEP   = "record-sep";
 static const char *SHORT_FLAG_HELP   = "h";
 static const char *LONG_FLAG_HELP    = "help";
 
@@ -85,7 +85,12 @@ static const char *USAGE = "%s [OPTIONS] file\n\n"
   "    -h, --help                 : Print this message\n";
 
 typedef enum {
-  OPT_UNKNOWN, OPT_FILTER, OPT_LIST, OPT_NO_HEADER, OPT_FORMAT, OPT_FIELD_SEP, OPT_RECORD_SEP, OPT_HELP
+  OPT_UNKNOWN,
+  OPT_FILTER,
+  OPT_LIST,
+  OPT_NO_HEADER,
+  OPT_FORMAT, OPT_FIELD_SEP, OPT_RECORD_SEP,
+  OPT_HELP
 } ProgramOpt;
 
 typedef enum {
@@ -99,13 +104,11 @@ typedef enum {
   FLAG_RECORD_SEP_SET = 1 << 2
 } OutputFlags;
 
-#define PROG_FLAGS_FILTERS_INIT_CAPACITY 256
-
 typedef struct CSV {
-  DA_DECLARE(char)    columns_storage;
-  DA_DECLARE(char)    data_storage;
-  DA_DECLARE(size_t)  columns_offsets;
-  DA_DECLARE(size_t)  points_offsets;
+  da_declare(char)    columns_storage;
+  da_declare(char)    data_storage;
+  da_declare(size_t)  columns_offsets;
+  da_declare(size_t)  points_offsets;
 } CSV;
 
 typedef struct Printer {
@@ -116,8 +119,8 @@ typedef struct Printer {
 } Printer;
 
 typedef struct Program {
-  DA_DECLARE(char)    filters;
-  DA_DECLARE(size_t)  valid_filter_column_offsets;
+  da_declare(char)    filters;
+  da_declare(size_t)  valid_filter_column_offsets;
   Printer             printer;
   FILE               *file;
   const char         *filepath;
