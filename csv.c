@@ -41,6 +41,15 @@
     ++(da)->count;                     \
   } while (0)                          \
 
+#define da_free(da)                          \
+  do {                                       \
+    void *ptr_to_free = (void *)(da)->items; \
+    (da)->items = NULL;                      \
+    (da)->count = 0;                         \
+    (da)->capacity = 0;                      \
+    free(ptr_to_free);                       \
+  } while (0)
+
 #define print_strings_at_offsets_in_contiguous_buffer(offsets, buf, fstring, sep, stream) \
   for (size_t i = 0; i < (offsets)->count; ++i) {                                         \
     fprintf((stream), (fstring), (buf) + (offsets)->items[i]);                            \
@@ -92,11 +101,11 @@ typedef struct Program {
   DA_DECLARE(char)    filters;
   DA_DECLARE(size_t)  valid_filter_column_offsets;
   FILE               *file;
-  char               *filepath;
+  const char         *filepath;
   CSV                *csv;
+  const char         *program_name;
   OutputFlags         output_flags;
   ProgramMode         mode;
-  const char         *program_name;
 } Program;
 
 struct IndexDA {
@@ -141,7 +150,7 @@ char *program_expect_filter(Program *, int argc, char **argv) {
   }
 }
 
-void program_filters_splits(Program *program) {
+void program_filters_split(Program *program) {
   char *buf = program->filters.items;
   for (size_t i = 0; i < program->filters.count; ++i)
     if (buf[i] == ',')
@@ -197,7 +206,7 @@ int program_flags_parse(Program *program, int argc, char **argv) {
     ++argv;
   }
 
-  program_filters_splits(program);
+  program_filters_split(program);
   return 0;
 }
 
@@ -209,7 +218,21 @@ int program_flags_open_filepath(Program *program) {
 int program_close_filepath(Program *program) {
   FILE *file_to_close = program->file;
   program->file = NULL;
-  return program->file != stdin ? fclose(file_to_close) : 0;
+  return file_to_close != stdin ? fclose(file_to_close) : 0;
+}
+
+void csv_free(CSV *csv) {
+  da_free(&csv->columns_storage);
+  da_free(&csv->data_storage);
+  da_free(&csv->columns_offsets);
+  da_free(&csv->points_offsets);
+}
+
+void program_free(Program *program) {
+  da_free(&program->filters);
+  da_free(&program->valid_filter_column_offsets);
+  program->file != NULL ? program_close_filepath(program) : 0;
+  program->csv != NULL ? csv_free(program->csv) : 0;
 }
 
 int csv_parse(CSV *csv, Program *program) {
@@ -395,14 +418,10 @@ void print_csv_header(const CSV *csv) {
   fputc('\n', stdout);
 }
 
-void print_csv_data(const Program *program) {
-  const CSV *csv = program->csv;
+void print_csv_body(const CSV *csv) {
   const typeof (csv->columns_offsets) *columns_offsets = &csv->columns_offsets;
   const typeof (csv->data_storage) *data = &csv->data_storage;
   const typeof (csv->points_offsets) *points = &csv->points_offsets;
-
-  if (!(program->output_flags & FLAG_NO_HEADER))
-    print_csv_header(csv);
 
   const char *ptr = data->items;
   size_t record_count = points->count / columns_offsets->count;
@@ -451,28 +470,16 @@ void print_filtered_csv_header(const CSV *csv, const size_t *indices, size_t cou
   fputc('\n', stdout);
 }
 
-void print_filtered_csv_data(const Program *program) {
-  const CSV *csv = program->csv;
+void print_filtered_csv_body(const CSV *csv, const size_t *indices, size_t count) {
   const typeof (csv->columns_offsets) *columns = &csv->columns_offsets;
   const typeof (csv->data_storage) *data = &csv->data_storage;
   const typeof (csv->points_offsets) *points = &csv->points_offsets;
 
-  struct IndexDA indices = {0};
-  populate_filter_indices(&indices, program);
-
-  if (indices.count == 0) {
-    print_csv_data(program);
-    return;
-  }
-
-  if (!(program->output_flags & FLAG_NO_HEADER))
-    print_filtered_csv_header(csv, indices.items, indices.count);
-
   size_t record_count = points->count / columns->count;
-  const size_t *end = indices.items + indices.count;
+  const size_t *end = indices + count;
   for (size_t record = 0; record < record_count; ++record) {
     const char *last_str = NULL;
-    for (const size_t *it = indices.items; it != end; ++it) {
+    for (const size_t *it = indices; it != end; ++it) {
       const char *str = data->items + points->items[record * columns->count + *it];
       if (last_str != NULL)
         fputc('\t', stdout);
@@ -481,6 +488,26 @@ void print_filtered_csv_data(const Program *program) {
       last_str = str;
     }
     fputc('\n', stdout);
+  }
+}
+
+void print_csv_data(const Program *program) {
+  struct IndexDA indices = {0};
+  populate_filter_indices(&indices, program);
+
+  if (indices.count != 0 && !(program->output_flags & FLAG_NO_HEADER)) {
+    print_filtered_csv_header(program->csv, indices.items, indices.count);
+    print_filtered_csv_body(program->csv, indices.items, indices.count);
+  }
+  else if (indices.count != 0) {
+    print_filtered_csv_body(program->csv, indices.items, indices.count);
+  }
+  else if (!(program->output_flags & FLAG_NO_HEADER)) {
+    print_csv_header(program->csv);
+    print_csv_body(program->csv);
+  }
+  else {
+    print_csv_body(program->csv);
   }
 }
 
@@ -498,7 +525,7 @@ void run_program_mode(const Program *program) {
       print_csv_columns(csv);
       break;
     case MODE_FILTER:
-      print_filtered_csv_data(program);
+      print_csv_data(program);
       break;
     default:
       ASSERT_UNREACHABLE;
@@ -531,4 +558,6 @@ int main(int argc, char **argv) {
     fputs("There was an error closing the file\n", stderr);
     return EXIT_FAILURE;
   }
+
+  program_free(&program);
 }
