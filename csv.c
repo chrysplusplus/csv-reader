@@ -254,8 +254,8 @@ void csv_free(CSV *csv) {
 void program_free(Program *program) {
   da_free(&program->filters);
   da_free(&program->valid_filter_column_offsets);
-  program->file != NULL ? program_close_filepath(program) : 0;
-  program->csv != NULL ? csv_free(program->csv) : 0;
+  if (program->file) program_close_filepath(program);
+  if (program->csv) csv_free(program->csv);
 }
 
 int csv_parse(CSV *csv, Program *program) {
